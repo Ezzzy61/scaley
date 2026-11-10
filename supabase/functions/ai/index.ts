@@ -2,7 +2,8 @@
 // - Only signed-in users can call it (checked through the ai_take_quota RPC with the caller's JWT).
 // - Shared keys: Gemini free tier first, Grok (xAI) as fallback, 30 calls/user/day.
 // - Bring-your-own-key: the user's key is forwarded for that one request and never stored or logged.
-// Secrets: GEMINI_API_KEY, XAI_API_KEY (optional), GEMINI_MODEL, XAI_MODEL (optional overrides).
+// Shared free chain (each optional, tried in AI_ORDER): GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, XAI_API_KEY.
+// Model overrides: GEMINI_MODEL, GROQ_MODEL, OPENROUTER_MODEL, XAI_MODEL.
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -105,6 +106,13 @@ async function gemini(key: string, model: string, system: string, msgs: Msg[], w
   return (j.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('');
 }
 
+const BASES: Record<string, { base: string; model: string; name: string }> = {
+  openai: { base: 'https://api.openai.com/v1', model: 'gpt-5-mini', name: 'OpenAI' },
+  xai: { base: 'https://api.x.ai/v1', model: 'grok-4', name: 'Grok' },
+  groq: { base: 'https://api.groq.com/openai/v1', model: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Groq' },
+  openrouter: { base: 'https://openrouter.ai/api/v1', model: 'openrouter/free', name: 'OpenRouter' },
+};
+
 async function openaiLike(base: string, key: string, model: string, system: string, msgs: Msg[]) {
   const messages = [{ role: 'system', content: system }, ...msgs.map((m) => ({
     role: m.role,
@@ -114,10 +122,10 @@ async function openaiLike(base: string, key: string, model: string, system: stri
   }))];
   const r = await fetch(`${base}/chat/completions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+    headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json', 'HTTP-Referer': 'https://ezzzy61.github.io/scaley/', 'X-Title': 'Scaley' },
     body: JSON.stringify({ model, messages }),
   });
-  if (!r.ok) throw new ProviderError(r.status, `${base.includes('x.ai') ? 'Grok' : 'OpenAI'} ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  if (!r.ok) throw new ProviderError(r.status, `${base} ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const j = await r.json();
   return j.choices?.[0]?.message?.content || '';
 }
@@ -170,36 +178,59 @@ Deno.serve(async (req) => {
         Authorization: req.headers.get('Authorization') || '',
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ p_count: !byok }),
+      body: JSON.stringify({ p_count: !byok && !['prompt', 'or_exchange'].includes(body.task) }),
     });
     if (!q.ok) return json({ error: 'Please sign in again.' }, 401);
     const quota = await q.json();
     if (!quota.ok) return json({ error: `You've used today's ${quota.limit} free AI requests. Add your own AI key in Settings, or try again tomorrow.` }, 429);
 
-    const { system, msgs, wantJson } = buildPrompt(body);
+    if (body.task === 'or_exchange') {
+      const r = await fetch('https://openrouter.ai/api/v1/auth/keys', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: String(body.code || ''), code_verifier: String(body.verifier || ''), code_challenge_method: 'S256' }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.key) return json({ error: 'OpenRouter connection failed. Try connecting again.' }, 400);
+      return json({ key: j.key });
+    }
+
+    const { system, msgs, wantJson } = buildPrompt(body.task === 'prompt' ? { ...body, task: body.kind } : body);
     let text = '', provider = '', model = '';
+
+    if (body.task === 'prompt') {
+      // For browser-side engines (Puter): return the prompt only; images stay on the device.
+      return json({ prompt: { system, msgs: msgs.map((m) => ({ role: m.role, text: m.text })), wantJson } });
+    }
+
+    const call = (prov: string, key: string, model: string) =>
+      prov === 'gemini' ? gemini(key, model, system, msgs, wantJson)
+      : prov === 'anthropic' ? anthropic(key, model, system, msgs)
+      : openaiLike(BASES[prov].base, key, model, system, msgs);
 
     if (byok) {
       provider = String(byok.provider);
-      if (provider === 'openai') { model = byok.model || 'gpt-5-mini'; text = await openaiLike('https://api.openai.com/v1', byok.key, model, system, msgs); }
-      else if (provider === 'xai') { model = byok.model || 'grok-4'; text = await openaiLike('https://api.x.ai/v1', byok.key, model, system, msgs); }
-      else if (provider === 'anthropic') { model = byok.model || 'claude-haiku-5-5'; text = await anthropic(byok.key, model, system, msgs); }
-      else if (provider === 'gemini') { model = byok.model || 'gemini-2.5-flash'; text = await gemini(byok.key, model, system, msgs, wantJson); }
-      else return json({ error: 'Unknown provider' }, 400);
+      const defaults: Record<string, string> = { gemini: 'gemini-2.5-flash', anthropic: 'claude-haiku-5-5', ...Object.fromEntries(Object.entries(BASES).map(([k, v]) => [k, v.model])) };
+      if (!(provider in defaults)) return json({ error: 'Unknown provider' }, 400);
+      model = String(byok.model || defaults[provider]).slice(0, 100);
+      text = await call(provider, byok.key, model);
     } else {
       const errors: string[] = [];
-      const gKey = Deno.env.get('GEMINI_API_KEY'), xKey = Deno.env.get('XAI_API_KEY');
-      if (gKey) {
-        try { model = Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash'; text = await gemini(gKey, model, system, msgs, wantJson); provider = 'gemini'; }
-        catch (e) { errors.push((e as Error).message); }
-      }
-      if (!provider && xKey) {
-        try { model = Deno.env.get('XAI_MODEL') || 'grok-4'; text = await openaiLike('https://api.x.ai/v1', xKey, model, system, msgs); provider = 'grok'; }
+      const order = (Deno.env.get('AI_ORDER') || 'gemini,groq,openrouter,xai').split(',').map((x) => x.trim());
+      const cfg: Record<string, [string | undefined, string]> = {
+        gemini: [Deno.env.get('GEMINI_API_KEY'), Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash'],
+        groq: [Deno.env.get('GROQ_API_KEY'), Deno.env.get('GROQ_MODEL') || BASES.groq.model],
+        openrouter: [Deno.env.get('OPENROUTER_API_KEY'), Deno.env.get('OPENROUTER_MODEL') || BASES.openrouter.model],
+        xai: [Deno.env.get('XAI_API_KEY'), Deno.env.get('XAI_MODEL') || BASES.xai.model],
+      };
+      for (const prov of order) {
+        const [key, m] = cfg[prov] || [];
+        if (!key) continue;
+        try { model = m; text = await call(prov, key, m); provider = prov; break; }
         catch (e) { errors.push((e as Error).message); }
       }
       if (!provider) {
         console.error('all providers failed', errors);
-        return json({ error: 'The free AI is busy or out of credits right now. Try again later, or add your own key in Settings.' }, 503);
+        return json({ error: 'Scaley Free AI is busy or out of credits right now. Connect your own AI in Settings, or try again later.' }, 503);
       }
     }
 

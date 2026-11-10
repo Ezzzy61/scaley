@@ -8,7 +8,7 @@ import { Fuel } from './Fuel.jsx';
 import { Iron } from './Iron.jsx';
 import { Progress } from './Progress.jsx';
 import { Coach } from './Coach.jsx';
-import { PROVIDERS, getByok, setByok } from './ai.js';
+import { KEY_PROVIDERS, PUTER_MODELS, getEngine, setEngine, connectOpenRouter, finishOpenRouter, puterSignIn, engineLabel, aiState } from './ai.js';
 import { Icon, Sheet } from './ui.jsx';
 
 const TABS = [
@@ -104,29 +104,56 @@ function Settings({ open, onClose, p }) {
   );
 }
 function AiSettings() {
-  const [b, setB] = useState(() => getByok() || { provider: 'gemini', key: '', model: '' });
-  const [saved, setSaved] = useState(!!getByok()?.key);
-  const prov = PROVIDERS.find((x) => x.key === b.provider) || PROVIDERS[0];
+  const [e, setE] = useState(getEngine);
+  const [draft, setDraft] = useState({ provider: e.type === 'key' ? e.provider : 'gemini', key: '', model: e.type === 'key' ? e.model || '' : '' });
+  const [msg, setMsg] = useState('');
+  const save = (n) => { setEngine(n); setE(n); };
+  const prov = KEY_PROVIDERS.find((x) => x.key === draft.provider) || KEY_PROVIDERS[0];
+  const opt = (type, title, sub, body) => (
+    <div class={'engine' + (e.type === type ? ' on' : '')}>
+      <div class="engine-head"><span class="dot" /><div><b>{title}</b><small class="muted">{sub}</small></div></div>
+      {body}
+    </div>
+  );
   return (
     <div class="stack">
-      <small class="eyebrow">AI (Coach, food photos, progress photos)</small>
-      <p class="muted">By default Scaley uses its shared free AI (30 requests a day each). For unlimited use, add your own API key. It stays only on this device and is passed through for each request, never stored by Scaley. ChatGPT, Claude or Gemini app subscriptions can't be connected; only API keys work.</p>
-      <label class="field"><span class="field-label">Provider</span>
-        <select value={b.provider} onChange={(e) => setB({ ...b, provider: e.currentTarget.value, model: '' })}>
-          {PROVIDERS.map((x) => <option value={x.key}>{x.label}</option>)}
-        </select>
-      </label>
-      <label class="field"><span class="field-label">API key</span>
-        <input type="password" autocomplete="off" value={b.key} placeholder={saved ? 'Saved on this device' : 'Paste your key'} onInput={(e) => setB({ ...b, key: e.currentTarget.value.trim() })} />
-        <a class="field-hint" href={prov.url} target="_blank" rel="noopener">Get a {prov.label} key ↗</a>
-      </label>
-      <label class="field"><span class="field-label">Model (optional)</span>
-        <input value={b.model} placeholder={prov.model} onInput={(e) => setB({ ...b, model: e.currentTarget.value.trim() })} />
-      </label>
-      <div class="row">
-        <button class="btn ghost" disabled={!b.key} onClick={() => { setByok(b); setSaved(true); }}>Use my key</button>
-        {saved && <button class="link danger-t" onClick={() => { setByok(null); setB({ provider: 'gemini', key: '', model: '' }); setSaved(false); }}>Remove key, use free AI</button>}
-      </div>
+      <small class="eyebrow">AI engine · now: {engineLabel(e)}</small>
+      <p class="muted small">Coach, plate photos and progress reviews run on the engine you choose. Your keys stay on this device only. ChatGPT/Claude/Gemini app subscriptions can't be linked; use one of the connect options below.</p>
+
+      {opt('free', 'Scaley Free', `Shared free AI (Gemini → Groq → OpenRouter → Grok). ${aiState.limit ? `${aiState.limit - (aiState.used || 0)} of ${aiState.limit} left today` : '30 requests a day'}.`,
+        e.type !== 'free' && <button class="btn ghost sm" onClick={() => save({ type: 'free', fallback: true })}>Use Scaley Free</button>)}
+
+      {opt('openrouter', 'Connect OpenRouter (1-click)', 'Sign in with OpenRouter. Free models give you 50 requests a day on your own account, or use any model (GPT, Claude, Gemini, Grok, Llama) with your own credit.',
+        e.type === 'openrouter'
+          ? <div class="row"><input value={e.model || ''} placeholder="openrouter/free" onChange={(ev) => save({ ...e, model: ev.currentTarget.value.trim() || 'openrouter/free' })} /><button class="link danger-t" onClick={() => save({ type: 'free', fallback: true })}>Disconnect</button></div>
+          : <button class="btn primary sm" onClick={() => connectOpenRouter()}>Connect OpenRouter</button>)}
+
+      {opt('puter', 'Sign in with Puter', 'Grok, GPT, Claude or Gemini through your own Puter account (user-pays, includes some free usage). Opens a Puter sign-in popup.',
+        <div class="row">
+          <select value={e.type === 'puter' ? e.model : PUTER_MODELS[0].id} onChange={(ev) => e.type === 'puter' && save({ ...e, model: ev.currentTarget.value })}>
+            {PUTER_MODELS.map((m) => <option value={m.id}>{m.label}</option>)}
+          </select>
+          {e.type !== 'puter' && <button class="btn primary sm" onClick={async () => {
+            setMsg('');
+            try { if (await puterSignIn()) save({ type: 'puter', model: PUTER_MODELS[0].id, fallback: true }); } catch (er) { setMsg(er.message || 'Puter sign-in failed'); }
+          }}>Sign in</button>}
+        </div>)}
+
+      {opt('key', 'Paste an API key', 'Free keys from Google AI Studio (Gemini) or Groq work well. Paid keys (OpenAI, Claude, Grok) also work.',
+        <div class="stack">
+          <select value={draft.provider} onChange={(ev) => setDraft({ ...draft, provider: ev.currentTarget.value, model: '' })}>
+            {KEY_PROVIDERS.map((x) => <option value={x.key}>{x.label}</option>)}
+          </select>
+          <input type="password" autocomplete="off" value={draft.key} placeholder={e.type === 'key' && e.provider === draft.provider ? 'Saved on this device' : 'Paste your key'} onInput={(ev) => setDraft({ ...draft, key: ev.currentTarget.value.trim() })} />
+          <input value={draft.model} placeholder={`Model (default ${prov.model})`} onInput={(ev) => setDraft({ ...draft, model: ev.currentTarget.value.trim() })} />
+          <div class="row">
+            <a class="link" href={prov.url} target="_blank" rel="noopener">Get a key ↗</a>
+            <button class="btn ghost sm" disabled={!draft.key} onClick={() => { save({ type: 'key', provider: draft.provider, key: draft.key, model: draft.model, fallback: e.fallback !== false }); setDraft({ ...draft, key: '' }); }}>Use this key</button>
+          </div>
+        </div>)}
+
+      <label class="row small"><input type="checkbox" style={{ width: '20px', minHeight: '20px' }} checked={e.fallback !== false} onChange={(ev) => save({ ...e, fallback: ev.currentTarget.checked })} /> If my engine fails or runs out, fall back to Scaley Free</label>
+      {msg && <p class="msg bad">{msg}</p>}
     </div>
   );
 }
@@ -151,6 +178,7 @@ export function App() {
       const uid = data.session?.user.id || (!navigator.onLine ? lastUid : null); // offline: keep working from device data
       if (uid) { openStore(uid); sync(); }
       setAuth({ loading: false, uid });
+      if (uid) finishOpenRouter().then((ok) => { if (ok) { alertBox('OpenRouter connected. Coach now runs on your account.'); setSettings(true); } }).catch((er) => alertBox(er.message));
     }).catch(() => { if (lastUid) openStore(lastUid); setAuth({ loading: false, uid: lastUid }); });
     const { data: sub } = supa.auth.onAuthStateChange((ev, session) => {
       if (session?.user && (ev === 'SIGNED_IN' || ev === 'INITIAL_SESSION' || ev === 'TOKEN_REFRESHED')) {

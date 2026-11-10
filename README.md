@@ -19,7 +19,13 @@ A minimalist, zero-BS fitness and deficit tracker for everyday lifters who eat h
 - **Commute & activity:** city-aware one-tap chips (Mumbai local and FOB stairs, Delhi Metro, Bengaluru traffic…), travel days, zone-2 walks, cycling, yoga, Surya Namaskar, cricket, badminton, garba and more. Uses net METs, so resting energy isn't counted twice.
 - **Plans:** starter, returning, busy professional, student, home bodyweight, classic Indian 6-day split, low-stress zone-2 fat loss, healthy ageing (55+), joint-friendly. Ranked for your profile, with custom workout templates.
 - **Local foods:** regional dishes for the user's state, with photo estimates matched to Scaley's Indian portion table (±10%).
-- **Coach (AI):** sees your check-ins, plan, logs, city and season. Shared free AI (Gemini, with Grok as fallback, 30/day) or bring your own API key.
+- **Coach (AI), hybrid engines:** sees your check-ins, plan, logs, city and season.
+  - *Scaley Free:* a shared chain of Gemini → Groq → OpenRouter free router → Grok (whichever server keys are set; 30 requests/user/day).
+  - *Connect OpenRouter:* 1-click OAuth PKCE; each user gets their own key and free-model allowance.
+  - *Sign in with Puter:* user-pays access to Grok, GPT, Claude and Gemini from the browser.
+  - *Paste a key:* Gemini, Groq, OpenRouter, OpenAI, Anthropic or xAI. Stored on the device only.
+  - Automatic fallback to Scaley Free when the user's engine fails.
+  - Server secrets: `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `XAI_API_KEY` (all optional), `AI_ORDER` to change the chain order.
 
 ## Stack
 

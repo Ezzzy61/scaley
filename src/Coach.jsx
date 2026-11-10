@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { put, remove, rows, newId, useStore } from './store.js';
 import { today } from './calc.js';
-import { callAI, shrinkImage, coachContext, aiState, getByok } from './ai.js';
+import { callAI, shrinkImage, coachContext, aiState, getEngine, engineLabel } from './ai.js';
 import { Icon } from './ui.jsx';
 
 const STARTERS = [
@@ -39,11 +39,11 @@ export function Coach({ p, ask }) {
     finally { setBusy(false); }
   }
 
-  const byok = getByok();
+  const eng = getEngine();
   return (
     <div class="page coach">
       <header class="top">
-        <div><h1 class="h1">Coach</h1><small class="muted">{byok?.key ? `Using your ${byok.provider} key` : `Free AI${aiState.limit ? ` · ${aiState.limit - (aiState.used || 0)} left today` : ''}`}</small></div>
+        <div><h1 class="h1">Coach</h1><small class="muted">{engineLabel(eng)}{eng.type === 'free' && aiState.limit ? ` · ${aiState.limit - (aiState.used || 0)} left today` : ''}{aiState.provider && eng.type === 'free' ? ` · via ${aiState.provider}` : ''}</small></div>
         {msgs.length > 0 && <button class="link" onClick={() => msgs.forEach((m) => remove('coach_messages', m.id))}>Clear</button>}
       </header>
 
