@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import { get, put, rows, useStore } from './store.js';
 import { dayBalance, proteinFloor, goalOf, today, prettyDay, fmt, int, weightSeries, stallCheck } from './calc.js';
 import { Bar, Icon } from './ui.jsx';
+import { CheckInCard, ActivityCard, ForYou } from './Today.jsx';
 
 export function DeficitMeter({ p, day }) {
   const b = dayBalance(day, p);
@@ -30,14 +31,15 @@ export function DeficitMeter({ p, day }) {
       <div class="eq">
         <span>BMR <b>{fmt(b.burn.bmr)}</b></span>+
         <span>Training <b>{fmt(b.burn.workout)}</b></span>+
-        <span>Steps <b>{fmt(b.burn.stepsKcal)}</b></span>−
+        <span>Steps <b>{fmt(b.burn.stepsKcal)}</b></span>+
+        <span>Activity <b>{fmt(b.burn.activity)}</b></span>−
         <span>Eaten <b>{fmt(eaten)}</b></span>
       </div>
     </section>
   );
 }
 
-export function Dashboard({ p, go, openSettings }) {
+export function Dashboard({ p, go, openSettings, askCoach }) {
   useStore();
   const day = today();
   const b = dayBalance(day, p);
@@ -57,7 +59,7 @@ export function Dashboard({ p, go, openSettings }) {
   return (
     <div class="page">
       <header class="top">
-        <div><h1 class="h1">Scaley</h1><small class="muted">{goalOf(p).label}</small></div>
+        <div><h1 class="h1">{greeting()}</h1><small class="muted">{goalOf(p).label}{p.city ? ` · ${p.city}` : ''}</small></div>
         <button class="icon-btn" onClick={openSettings} aria-label="Settings"><Icon name="gear" /></button>
       </header>
 
@@ -66,6 +68,8 @@ export function Dashboard({ p, go, openSettings }) {
           <Icon name="alert" /> <span>Stall: no new {goalOf(p).dir < 0 ? 'low' : 'high'} in your 7-day average for {stall.since} days. Tap for the fix.</span>
         </button>
       )}
+
+      <CheckInCard p={p} askCoach={askCoach} />
 
       <DeficitMeter p={p} day={day} />
 
@@ -84,8 +88,10 @@ export function Dashboard({ p, go, openSettings }) {
         </section>
       </div>
 
+      <ActivityCard p={p} />
+
       <section class="card">
-        <small class="eyebrow">Today's activity</small>
+        <small class="eyebrow">Steps & gym</small>
         <div class="grid2">
           <label class="field"><span class="field-label">Steps</span>
             <input inputMode="numeric" placeholder="0" value={steps}
@@ -112,6 +118,12 @@ export function Dashboard({ p, go, openSettings }) {
           <small class="muted">{last?.day === day ? `Today ${fmt(last.kg, 1)} kg` : 'Log your morning weigh-in'}</small>
         </section>
       </div>
+      <ForYou p={p} go={go} askCoach={askCoach} />
     </div>
   );
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
 }

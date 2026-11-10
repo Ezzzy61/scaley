@@ -12,9 +12,18 @@ A minimalist, zero-BS fitness and deficit tracker for everyday lifters who eat h
 - **Diagnostics:** morning weigh-ins with a 7-day moving average, a stall alert after 10+ days without a new low or high, and a 7-day "Figure It Out" mode that measures your real TDEE.
 - **Offline-first PWA:** installable, and every write saves on the device first, then syncs to Supabase once you're back online.
 
+## Personal coach (v3)
+
+- **Profile:** state, city and locality; working, student, home or retired; new, returning or regular; diet; optional health notes; coach language (Hinglish or English).
+- **Daily check-in:** sleep, energy, stress, soreness and travel time give a readiness score with a train / controlled / light / rest call.
+- **Commute & activity:** city-aware one-tap chips (Mumbai local and FOB stairs, Delhi Metro, Bengaluru traffic…), travel days, zone-2 walks, cycling, yoga, Surya Namaskar, cricket, badminton, garba and more. Uses net METs, so resting energy isn't counted twice.
+- **Plans:** starter, returning, busy professional, student, home bodyweight, classic Indian 6-day split, low-stress zone-2 fat loss, healthy ageing (55+), joint-friendly. Ranked for your profile, with custom workout templates.
+- **Local foods:** regional dishes for the user's state, with photo estimates matched to Scaley's Indian portion table (±10%).
+- **Coach (AI):** sees your check-ins, plan, logs, city and season. Shared free AI (Gemini, with Grok as fallback, 30/day) or bring your own API key.
+
 ## Stack
 
-Preact + esbuild static PWA on GitHub Pages; Supabase Auth (email/password) + Postgres with row-level security (`supabase/schema.sql`).
+Preact + esbuild static PWA on GitHub Pages; Supabase Auth + Postgres with row-level security (`supabase/schema.sql`, `002_ai.sql`, `003_coach.sql`); private Storage bucket for progress photos; Edge Function `supabase/functions/ai` as the AI gateway (keys live in Supabase secrets, never in the app).
 
 ## Develop
 

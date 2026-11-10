@@ -26,8 +26,9 @@ export function plannedBurn(p) {
   return bmr(p) + (p?.plan_workout_kcal ?? 250) + stepKcal(p?.step_goal ?? 8000);
 }
 export const kcalFloor = (p) => (p?.sex === 'male' ? 1500 : 1200);
+export const noDeficit = (p) => (p?.conditions || []).includes('pregnancy');
 export function targetKcal(p) {
-  const raw = plannedBurn(p) + goalOf(p).offset;
+  const raw = plannedBurn(p) + (noDeficit(p) ? Math.max(0, goalOf(p).offset) : goalOf(p).offset);
   return Math.max(kcalFloor(p), Math.round(raw / 10) * 10);
 }
 export const proteinFloor = (p) => Math.round((p?.weight_kg || 0) * goalOf(p).protein);
@@ -35,13 +36,13 @@ export const proteinFloor = (p) => Math.round((p?.weight_kg || 0) * goalOf(p).pr
 // ---------- per-day numbers ----------
 export function dayIntake(day) {
   const foods = rows('food_entries').filter((f) => f.day === day);
-  let kcal = 0, protein = 0;
-  for (const f of foods) { kcal += f.kcal * f.qty; protein += f.protein * f.qty; }
+  let kcal = 0, protein = 0, carbs = 0, fat = 0;
+  for (const f of foods) { kcal += f.kcal * f.qty; protein += f.protein * f.qty; carbs += (f.carbs || 0) * f.qty; fat += (f.fat || 0) * f.qty; }
   let oil = 0;
   for (const m of rows('meals').filter((m) => m.day === day)) {
     if (foods.some((f) => f.meal_id === m.id && f.qty > 0)) oil += oilKcal(m.oil);
   }
-  return { kcal: Math.round(kcal + oil), protein: Math.round(protein), oil, items: foods.length };
+  return { kcal: Math.round(kcal + oil), protein: Math.round(protein), carbs: Math.round(carbs), fat: Math.round(fat + oil / 9), oil, items: foods.length };
 }
 
 // Strength training estimate: ~0.18 kcal per kg bodyweight per completed working set.
@@ -54,8 +55,26 @@ export function dayBurn(day, p) {
   const steps = log?.steps || 0;
   const auto = autoWorkoutKcal(day, p);
   const workout = log?.workout_kcal ?? auto;
+  const acts = rows('activities').filter((a) => a.day === day);
+  const activity = acts.reduce((s, a) => s + (a.kcal || 0), 0);
+  const activeMin = acts.reduce((s, a) => s + (a.minutes || 0), 0);
   const b = bmr(p);
-  return { bmr: b, steps, stepsKcal: stepKcal(steps), workout, autoWorkout: auto, total: b + workout + stepKcal(steps) };
+  return { bmr: b, steps, stepsKcal: stepKcal(steps), workout, autoWorkout: auto, activity, activeMin, total: b + workout + stepKcal(steps) + activity };
+}
+
+// Readiness 0-100 from today's check-in, plus a plain-language call.
+export function readiness(c, travelMin = 0) {
+  if (!c) return null;
+  if (c.sick) return { score: 15, level: 'rest', title: 'Rest and recover', text: 'You\'re unwell. No training today. Sleep, fluids, dal-chawal and rest. If it lasts more than a few days or you have chest pain or fever, see a doctor.' };
+  const sleepPts = Math.max(0, 25 - Math.abs(7.5 - (c.sleep_h ?? 7)) * 7);
+  const q = ((c.sleep_q ?? 3) - 1) / 4, e = ((c.energy ?? 3) - 1) / 4, s = 1 - ((c.stress ?? 3) - 1) / 4, so = 1 - ((c.soreness ?? 3) - 1) / 4;
+  let score = sleepPts + q * 15 + e * 25 + s * 15 + so * 20;
+  if (travelMin > 120) score -= Math.min(15, (travelMin - 120) / 12);
+  score = Math.round(Math.max(0, Math.min(100, score)));
+  if (score >= 75) return { score, level: 'go', title: 'Green light. Train as planned', text: 'You\'re recovered. Go for your planned session, and try a small PR if the warm-up sets fly.' };
+  if (score >= 55) return { score, level: 'steady', title: 'Train, but keep it controlled', text: 'Do your session at RPE 7, leaving 2–3 reps in the tank. Skip extra cardio today.' };
+  if (score >= 35) return { score, level: 'light', title: 'Go light today', text: 'A 30–40 minute zone-2 walk plus 10 minutes of mobility. It feels easy and builds the habit without draining you further.' };
+  return { score, level: 'rest', title: 'Rest day, no guilt', text: 'Recovery is training too. Get to bed early, keep your protein floor, maybe 15 minutes of easy walking.' };
 }
 // Real-time deficit = (BMR + workout + steps*0.045) - eaten.
 export function dayBalance(day, p) {

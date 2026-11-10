@@ -1,8 +1,10 @@
-import { useState } from 'preact/hooks';
-import { get, put, remove, useStore } from './store.js';
+import { useEffect, useState } from 'preact/hooks';
+import { get, put, remove, rows, newId, useStore } from './store.js';
+import { supa } from './supa.js';
+import { callAI, shrinkImage, coachContext } from './ai.js';
 import { weightSeries, stallCheck, diagnostic, goalOf, today, addDays, prettyDay, fmt, num, dayIntake, dayBurn, targetKcal, proteinFloor, daysBetween } from './calc.js';
 import { GOALS } from './data.js';
-import { Icon, Field } from './ui.jsx';
+import { Icon, Field, Seg } from './ui.jsx';
 
 function Chart({ series }) {
   const W = 340, H = 170, P = 26;
@@ -32,6 +34,19 @@ export function Progress({ p }) {
   const [day, setDay] = useState(today());
   const existing = get('weigh_ins', day);
   const [kg, setKg] = useState('');
+  const [scaleMsg, setScaleMsg] = useState('');
+  async function readScale(e) {
+    const f = e.currentTarget.files?.[0]; e.currentTarget.value = '';
+    if (!f) return;
+    setScaleMsg('Reading the scale…');
+    try {
+      const img = await shrinkImage(f, 900);
+      const out = await callAI('scale', { images: [{ mime: img.mime, b64: img.b64 }] });
+      const v = Number(out.data?.kg);
+      if (v >= 25 && v <= 300) { setKg(String(Math.round(v * 10) / 10)); setScaleMsg(`Read ${out.data?.shown || v + ' kg'}. Check it, then Save.`); }
+      else setScaleMsg("Couldn't read the display. Try a sharper, straight-on photo.");
+    } catch (err) { setScaleMsg(err.message); }
+  }
   const series = weightSeries();
   const last = series[series.length - 1];
   const weekAgo = [...series].reverse().find((s) => s.day <= addDays(last?.day || today(), -7));
@@ -71,6 +86,10 @@ export function Progress({ p }) {
           <input inputMode="decimal" placeholder={existing ? `${existing.kg} kg logged` : 'kg'} value={kg} onInput={(e) => setKg(e.currentTarget.value)} aria-label="Weight in kg" />
           <button class="btn primary">Save</button>
         </div>
+        <label class="btn ghost full"><Icon name="camera" size={16} /> Read weight from a scale photo
+          <input type="file" accept="image/*" capture="environment" hidden onChange={readScale} />
+        </label>
+        {scaleMsg && <small class="muted">{scaleMsg}</small>}
         {existing && <button type="button" class="link danger-t" onClick={() => remove('weigh_ins', day)}>Remove {prettyDay(day).toLowerCase()}'s weigh-in</button>}
       </form>
 
@@ -85,6 +104,8 @@ export function Progress({ p }) {
         <Chart series={series} />
         <small class="muted"><span class="legend dot" /> daily weigh-in &nbsp; <span class="legend ma" /> 7-day average. Ignore single spikes from a salty dhaba dinner and watch the line.</small>
       </section>
+
+      <ProgressPhotos p={p} />
 
       {stall && (
         <section class={'card ' + (stall.stalled ? 'stall' : 'ok')}>
@@ -146,5 +167,95 @@ export function Progress({ p }) {
         {avg != null && <p class="muted">Avg {fmt(avg)} kcal on {logged.length} logged days · protein floor hit {proteinHits}/{logged.length}</p>}
       </section>
     </div>
+  );
+}
+
+function ProgressPhotos({ p }) {
+  useStore();
+  const photos = rows('progress_photos').sort((a, b) => b.day.localeCompare(a.day) || (b.updated_at > a.updated_at ? 1 : -1));
+  const [urls, setUrls] = useState({});
+  const [kind, setKind] = useState('front');
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+  const [open, setOpen] = useState(null);
+  const key = photos.map((x) => x.path).join('|');
+
+  useEffect(() => {
+    const need = photos.map((x) => x.path).filter((pth) => !urls[pth]);
+    if (!need.length || !navigator.onLine) return;
+    supa.storage.from('progress').createSignedUrls(need, 3600).then(({ data }) => {
+      if (data) setUrls((u) => { const n = { ...u }; data.forEach((d) => { if (d.signedUrl) n[d.path] = d.signedUrl; }); return n; });
+    });
+  }, [key]);
+
+  async function upload(e) {
+    const f = e.currentTarget.files?.[0]; e.currentTarget.value = '';
+    if (!f) return;
+    if (!navigator.onLine) { setErr('Connect to the internet to upload photos.'); return; }
+    setErr(''); setBusy('Uploading…');
+    try {
+      const img = await shrinkImage(f, 1280, 0.85);
+      const { data: { session } } = await supa.auth.getSession();
+      const id = newId(), day = today();
+      const path = `${session.user.id}/${day}-${id}.jpg`;
+      const { error } = await supa.storage.from('progress').upload(path, img.blob, { contentType: 'image/jpeg' });
+      if (error) throw error;
+      const latestW = rows('weigh_ins').sort((a, b) => b.day.localeCompare(a.day))[0];
+      put('progress_photos', { id, day, path, kind, kg: latestW?.kg ?? null });
+      setUrls((u) => ({ ...u, [path]: img.dataUrl }));
+    } catch (er) { setErr(er.message || 'Upload failed'); }
+    finally { setBusy(''); }
+  }
+
+  async function analyze(ph) {
+    setErr(''); setBusy('Coach is looking…');
+    try {
+      const toImg = async (pth) => {
+        const { data, error } = await supa.storage.from('progress').download(pth);
+        if (error) throw error;
+        return shrinkImage(data, 896, 0.8);
+      };
+      const prev = photos.find((x) => x.kind === ph.kind && x.day < ph.day && daysBetween(x.day, ph.day) >= 7);
+      const imgs = [await toImg(ph.path)];
+      if (prev) imgs.push(await toImg(prev.path));
+      const out = await callAI('physique', { images: imgs.map((i) => ({ mime: i.mime, b64: i.b64 })), context: { ...coachContext(p), photoDay: ph.day, comparedWith: prev?.day || null } });
+      const d = out.data || {};
+      const note = [d.summary, ...(d.observations || []).map((o) => '• ' + o), ...(d.next || []).map((o) => '→ ' + o), d.bodyfat_range ? `Rough body-fat range: ${d.bodyfat_range} (visual guess)` : ''].filter(Boolean).join('\n');
+      put('progress_photos', { id: ph.id, ai_note: note.slice(0, 5900) });
+    } catch (er) { setErr(er.message); }
+    finally { setBusy(''); }
+  }
+
+  const cur = open && photos.find((x) => x.id === open);
+  return (
+    <section class="card">
+      <small class="eyebrow">Progress photos · private to you</small>
+      <div class="row">
+        <Seg small value={kind} onChange={setKind} options={[{ value: 'front', label: 'Front' }, { value: 'side', label: 'Side' }, { value: 'back', label: 'Back' }]} />
+        <label class="btn primary"><Icon name="camera" size={16} /> Add
+          <input type="file" accept="image/*" hidden onChange={upload} />
+        </label>
+      </div>
+      {busy && <small class="muted">{busy}</small>}
+      {err && <p class="msg bad">{err}</p>}
+      {!photos.length && <p class="muted">Same spot, same light, every 1–2 weeks. Coach compares each photo with one from at least a week earlier.</p>}
+      <div class="ph-grid">
+        {photos.slice(0, 12).map((x) => (
+          <button class={'ph' + (open === x.id ? ' on' : '')} onClick={() => setOpen(open === x.id ? null : x.id)}>
+            {urls[x.path] ? <img src={urls[x.path]} alt={`${x.kind} ${x.day}`} loading="lazy" /> : <span class="muted">…</span>}
+            <small>{prettyDay(x.day)}{x.kg ? ` · ${fmt(x.kg, 1)}` : ''}</small>
+          </button>
+        ))}
+      </div>
+      {cur && (
+        <div class="stack">
+          {cur.ai_note ? <p class="ai-note">{cur.ai_note}</p> : <p class="muted">No review yet.</p>}
+          <div class="row">
+            <button class="btn ghost" disabled={!!busy} onClick={() => analyze(cur)}><Icon name="spark" size={16} /> {cur.ai_note ? 'Review again' : 'Get Coach review'}</button>
+            <button class="link danger-t" onClick={async () => { await supa.storage.from('progress').remove([cur.path]); remove('progress_photos', cur.id); setOpen(null); }}>Delete</button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

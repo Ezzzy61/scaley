@@ -7,12 +7,15 @@ import { Dashboard } from './Dashboard.jsx';
 import { Fuel } from './Fuel.jsx';
 import { Iron } from './Iron.jsx';
 import { Progress } from './Progress.jsx';
+import { Coach } from './Coach.jsx';
+import { PROVIDERS, getByok, setByok } from './ai.js';
 import { Icon, Sheet } from './ui.jsx';
 
 const TABS = [
   { key: 'home', label: 'Dashboard', icon: 'home' },
   { key: 'fuel', label: 'Fuel', icon: 'fuel' },
   { key: 'iron', label: 'Iron', icon: 'iron' },
+  { key: 'coach', label: 'Coach', icon: 'chat' },
   { key: 'progress', label: 'Progress', icon: 'chart' },
 ];
 const tabFromHash = () => (TABS.some((t) => '#' + t.key === location.hash) ? location.hash.slice(1) : 'home');
@@ -83,6 +86,8 @@ function Settings({ open, onClose, p }) {
     <Sheet open={open} onClose={onClose} title="Settings">
       <ProfileForm initial={p} showAdvanced submitLabel="Save profile" onSaved={onClose} />
       <hr />
+      <AiSettings />
+      <hr />
       <div class="stack">
         <SyncDot />
         <button class="btn ghost full" onClick={() => sync()}>Sync now</button>
@@ -98,6 +103,34 @@ function Settings({ open, onClose, p }) {
     </Sheet>
   );
 }
+function AiSettings() {
+  const [b, setB] = useState(() => getByok() || { provider: 'gemini', key: '', model: '' });
+  const [saved, setSaved] = useState(!!getByok()?.key);
+  const prov = PROVIDERS.find((x) => x.key === b.provider) || PROVIDERS[0];
+  return (
+    <div class="stack">
+      <small class="eyebrow">AI (Coach, food photos, progress photos)</small>
+      <p class="muted">By default Scaley uses its shared free AI (30 requests a day each). For unlimited use, add your own API key. It stays only on this device and is passed through for each request, never stored by Scaley. ChatGPT, Claude or Gemini app subscriptions can't be connected; only API keys work.</p>
+      <label class="field"><span class="field-label">Provider</span>
+        <select value={b.provider} onChange={(e) => setB({ ...b, provider: e.currentTarget.value, model: '' })}>
+          {PROVIDERS.map((x) => <option value={x.key}>{x.label}</option>)}
+        </select>
+      </label>
+      <label class="field"><span class="field-label">API key</span>
+        <input type="password" autocomplete="off" value={b.key} placeholder={saved ? 'Saved on this device' : 'Paste your key'} onInput={(e) => setB({ ...b, key: e.currentTarget.value.trim() })} />
+        <a class="field-hint" href={prov.url} target="_blank" rel="noopener">Get a {prov.label} key ↗</a>
+      </label>
+      <label class="field"><span class="field-label">Model (optional)</span>
+        <input value={b.model} placeholder={prov.model} onInput={(e) => setB({ ...b, model: e.currentTarget.value.trim() })} />
+      </label>
+      <div class="row">
+        <button class="btn ghost" disabled={!b.key} onClick={() => { setByok(b); setSaved(true); }}>Use my key</button>
+        {saved && <button class="link danger-t" onClick={() => { setByok(null); setB({ provider: 'gemini', key: '', model: '' }); setSaved(false); }}>Remove key, use free AI</button>}
+      </div>
+    </div>
+  );
+}
+
 function alertBox(text) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = text; document.body.appendChild(d); setTimeout(() => d.remove(), 4000); }
 
 export function App() {
@@ -105,6 +138,7 @@ export function App() {
   const [auth, setAuth] = useState({ loading: true, uid: null });
   const [tab, setTab] = useState(tabFromHash());
   const [settings, setSettings] = useState(false);
+  const [ask, setAsk] = useState(null);
   const [timer, setTimerState] = useState(() => { try { const t = JSON.parse(localStorage.getItem('scaley:timer')); return t && t.end > Date.now() - 60000 ? t : null; } catch { return null; } });
   const setTimer = (t) => { setTimerState(t); try { t ? localStorage.setItem('scaley:timer', JSON.stringify(t)) : localStorage.removeItem('scaley:timer'); } catch {} };
 
@@ -141,16 +175,18 @@ export function App() {
     return <Onboarding />;
   }
 
+  const askCoach = (text) => { setAsk({ text, n: Date.now() }); go('coach'); };
   const onSetDone = () => { unlockAudio(); const s = p.rest_default || 90; setTimer({ end: Date.now() + s * 1000, dur: s }); };
 
   return (
     <div class="app">
       <div class="statusbar"><SyncDot /></div>
       <main>
-        {tab === 'home' && <Dashboard p={p} go={go} openSettings={() => setSettings(true)} />}
+        {tab === 'home' && <Dashboard p={p} go={go} openSettings={() => setSettings(true)} askCoach={askCoach} />}
         {tab === 'fuel' && <Fuel p={p} />}
-        {tab === 'iron' && <Iron p={p} onSetDone={onSetDone} />}
+        {tab === 'iron' && <Iron p={p} onSetDone={onSetDone} askCoach={askCoach} />}
         {tab === 'progress' && <Progress p={p} />}
+        {tab === 'coach' && <Coach p={p} ask={ask} />}
       </main>
       <RestTimer timer={timer} setTimer={setTimer} />
       <nav class="tabbar">

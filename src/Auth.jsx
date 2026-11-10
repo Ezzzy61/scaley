@@ -31,6 +31,13 @@ export function Auth() {
     }
   }
 
+  async function oauth(provider) {
+    setMsg(null);
+    if (!navigator.onLine) return setMsg({ bad: true, text: 'You are offline.' });
+    const { error } = await supa.auth.signInWithOAuth({ provider, options: { redirectTo: location.origin + location.pathname } });
+    if (error) setMsg({ bad: true, text: error.message });
+  }
+
   async function reset() {
     if (!email) return setMsg({ bad: true, text: 'Enter your email first.' });
     const { error } = await supa.auth.resetPasswordForEmail(email.trim(), { redirectTo: location.origin + location.pathname });
@@ -45,6 +52,11 @@ export function Auth() {
         <p>No scale. No BS. Just katoris, rotis and raw iron.</p>
       </div>
       <form class="card" onSubmit={submit}>
+        <div class="oauth">
+          <button type="button" class="btn oauth-btn full" onClick={() => oauth('google')}>Continue with Google</button>
+          <button type="button" class="btn oauth-btn gh full" onClick={() => oauth('github')}>Continue with GitHub</button>
+        </div>
+        <div class="or">or use email</div>
         <div class="seg">
           <button type="button" class={mode === 'signup' ? 'on' : ''} onClick={() => setMode('signup')}>Create account</button>
           <button type="button" class={mode === 'signin' ? 'on' : ''} onClick={() => setMode('signin')}>Sign in</button>

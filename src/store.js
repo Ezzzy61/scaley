@@ -5,16 +5,22 @@
 import { useEffect, useState } from 'preact/hooks';
 import { supa } from './supa.js';
 
-export const TABLES = ['profiles', 'meals', 'food_entries', 'workouts', 'workout_sets', 'weigh_ins', 'day_logs'];
+export const TABLES = ['profiles', 'meals', 'food_entries', 'workouts', 'workout_sets', 'weigh_ins', 'day_logs', 'progress_photos', 'coach_messages', 'checkins', 'activities', 'workout_templates'];
 const COMMON = ['user_id', 'id', 'updated_at', 'deleted'];
 const COLS = {
-  profiles: ['sex', 'age', 'height_cm', 'weight_kg', 'target_kg', 'goal', 'step_goal', 'plan_workout_kcal', 'rest_default', 'tdee', 'started_on'],
+  profiles: ['sex', 'age', 'height_cm', 'weight_kg', 'target_kg', 'goal', 'step_goal', 'plan_workout_kcal', 'rest_default', 'tdee', 'started_on',
+    'state', 'city', 'locality', 'occupation', 'experience', 'conditions', 'coach_lang', 'plan_id', 'diet'],
   meals: ['day', 'slot', 'oil'],
-  food_entries: ['day', 'meal_id', 'item', 'name', 'unit', 'qty', 'kcal', 'protein'],
+  food_entries: ['day', 'meal_id', 'item', 'name', 'unit', 'qty', 'kcal', 'protein', 'carbs', 'fat', 'source'],
   workouts: ['day', 'split', 'started_at', 'finished', 'exercises'],
   workout_sets: ['workout_id', 'day', 'exercise', 'idx', 'kg', 'reps', 'done'],
   weigh_ins: ['day', 'kg'],
   day_logs: ['day', 'steps', 'workout_kcal'],
+  progress_photos: ['day', 'path', 'kind', 'note', 'ai_note', 'kg'],
+  coach_messages: ['day', 'role', 'content'],
+  checkins: ['day', 'sleep_h', 'sleep_q', 'energy', 'stress', 'soreness', 'sick', 'note', 'score'],
+  activities: ['day', 'type', 'label', 'minutes', 'met', 'kcal'],
+  workout_templates: ['name', 'exercises'],
 };
 
 let S = null;

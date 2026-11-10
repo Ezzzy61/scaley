@@ -1,9 +1,11 @@
 import { useState } from 'preact/hooks';
-import { FOODS, FOOD_CATS, OIL, SLOTS, oilKcal } from './data.js';
+import { FOODS, FOOD_CATS, OIL, SLOTS, oilKcal, foodsForRegion } from './data.js';
+import { regionOf } from './regions.js';
 import { get, put, remove, rows, newId, useStore } from './store.js';
 import { dayIntake, targetKcal, proteinFloor, today, addDays, prettyDay, fmt, num } from './calc.js';
 import { Bar, Icon, Sheet, Stepper, Field } from './ui.jsx';
 import { DeficitMeter } from './Dashboard.jsx';
+import { PhotoFood } from './PhotoFood.jsx';
 
 const mealId = (day, slot) => `${day}_${slot}`;
 
@@ -16,13 +18,14 @@ function addFood(day, slot, f, qty) {
   const m = ensureMeal(day, slot);
   const existing = rows('food_entries').find((e) => e.meal_id === m.id && e.item === f.id && f.id !== 'custom');
   if (existing) return put('food_entries', { id: existing.id, qty: Math.round((existing.qty + (qty ?? 1)) * 100) / 100 });
-  put('food_entries', { id: newId(), day, meal_id: m.id, item: f.id, name: f.name, unit: f.unit, qty: qty ?? 1, kcal: f.kcal, protein: f.p });
+  put('food_entries', { id: newId(), day, meal_id: m.id, item: f.id, name: f.name, unit: f.unit, qty: qty ?? 1, kcal: f.kcal, protein: f.p, carbs: f.c ?? 0, fat: f.f ?? 0, source: 'manual' });
 }
 
 export function Fuel({ p }) {
   useStore();
   const [day, setDay] = useState(today());
   const [picker, setPicker] = useState(null); // slot key
+  const [snap, setSnap] = useState(null); // slot key
   const tot = dayIntake(day);
   const target = targetKcal(p), pf = proteinFloor(p);
   const entries = rows('food_entries').filter((e) => e.day === day);
@@ -41,6 +44,7 @@ export function Fuel({ p }) {
           <div><small class="eyebrow">Protein</small><div class={'mid num ' + (tot.protein >= pf ? 'em-t' : '')}>{tot.protein}<span> / {pf} g</span></div></div>
         </div>
         <Bar value={tot.kcal} max={target} tone={tot.kcal > target ? 'rose' : 'em'} />
+        <div class="macro-row num"><span>Carbs {tot.carbs} g</span><span>Fat {tot.fat} g</span></div>
         <small class="muted">Includes {fmt(tot.oil)} kcal of hidden cooking oil</small>
       </section>
 
@@ -68,28 +72,34 @@ export function Fuel({ p }) {
               const f = FOODS.find((x) => x.id === e.item);
               return (
                 <div class="item">
-                  <div class="item-name"><b>{e.name}</b><small class="muted">{e.unit} · {fmt(e.kcal * e.qty)} kcal · {fmt(e.protein * e.qty, 1)} g P</small></div>
+                  <div class="item-name"><b>{e.name}</b><small class="muted">{e.unit} · {fmt(e.kcal * e.qty)} kcal · {fmt(e.protein * e.qty, 1)} g P{e.source === 'photo' ? ' · 📷 ±10%' : ''}</small></div>
                   <Stepper value={e.qty} step={f?.step || 1}
                     onChange={(q) => (q <= 0 ? remove('food_entries', e.id) : put('food_entries', { id: e.id, qty: q }))} />
                 </div>
               );
             })}
-            <button class="btn ghost full" onClick={() => setPicker(s.key)}><Icon name="plus" size={16} /> Add food</button>
+            <div class="grid2">
+              <button class="btn ghost" onClick={() => setPicker(s.key)}><Icon name="plus" size={16} /> Add food</button>
+              <button class="btn ghost" onClick={() => setSnap(s.key)}><Icon name="camera" size={16} /> Snap plate</button>
+            </div>
           </section>
         );
       })}
 
       <DeficitMeter p={p} day={day} />
 
-      <Picker open={!!picker} slot={picker} day={day} onClose={() => setPicker(null)} />
+      <Picker open={!!picker} slot={picker} day={day} p={p} onClose={() => setPicker(null)} />
+      <PhotoFood open={!!snap} slot={snap} day={day} onClose={() => setSnap(null)} />
     </div>
   );
 }
 
-function Picker({ open, slot, day, onClose }) {
+function Picker({ open, slot, day, p, onClose }) {
   useStore();
-  const [cat, setCat] = useState('bread');
-  const [c, setC] = useState({ name: '', kcal: '', p: '' });
+  const region = regionOf(p?.state);
+  const local = region === 'ALL' ? foodsForRegion('ALL') : FOODS.filter((f) => f.r && (f.r.includes(region) || f.r.includes('ALL')));
+  const [cat, setCat] = useState(local.length ? 'local' : 'bread');
+  const [c, setC] = useState({ name: '', kcal: '', p: '', cb: '', ft: '' });
   if (!open) return null;
   const meal = mealId(day, slot);
   const inMeal = rows('food_entries').filter((e) => e.meal_id === meal);
@@ -99,8 +109,8 @@ function Picker({ open, slot, day, onClose }) {
     e.preventDefault();
     const kcal = num(c.kcal), p = num(c.p) ?? 0;
     if (!c.name.trim() || kcal == null) return;
-    addFood(day, slot, { id: 'custom', name: c.name.trim().slice(0, 80), unit: 'custom', kcal, p, step: 1 }, 1);
-    setC({ name: '', kcal: '', p: '' });
+    addFood(day, slot, { id: 'custom', name: c.name.trim().slice(0, 80), unit: 'custom', kcal, p, c: num(c.cb) ?? 0, f: num(c.ft) ?? 0, step: 1 }, 1);
+    setC({ name: '', kcal: '', p: '', cb: '', ft: '' });
   }
 
   return (
@@ -116,12 +126,14 @@ function Picker({ open, slot, day, onClose }) {
           <div class="grid2">
             <Field label="kcal"><input inputMode="decimal" value={c.kcal} onInput={(e) => setC({ ...c, kcal: e.currentTarget.value })} /></Field>
             <Field label="Protein (g)"><input inputMode="decimal" value={c.p} onInput={(e) => setC({ ...c, p: e.currentTarget.value })} /></Field>
+            <Field label="Carbs (g)"><input inputMode="decimal" value={c.cb} onInput={(e) => setC({ ...c, cb: e.currentTarget.value })} /></Field>
+            <Field label="Fat (g)"><input inputMode="decimal" value={c.ft} onInput={(e) => setC({ ...c, ft: e.currentTarget.value })} /></Field>
           </div>
           <button class="btn primary full">Add custom item</button>
         </form>
       ) : (
         <div class="food-list">
-          {FOODS.filter((f) => f.cat === cat).map((f) => {
+          {(cat === 'local' ? local : FOODS.filter((f) => f.cat === cat)).map((f) => {
             const q = inMeal.find((e) => e.item === f.id)?.qty;
             return (
               <button class={'food' + (q ? ' on' : '')} onClick={() => addFood(day, slot, f)}>
