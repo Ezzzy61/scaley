@@ -9,8 +9,8 @@ import { climateTip } from './regions.js';
 
 const ENGINE_KEY = 'scaley:engine';
 export const KEY_PROVIDERS = [
-  { key: 'gemini', label: 'Google Gemini (free tier)', model: 'gemini-2.5-flash', url: 'https://aistudio.google.com/apikey', free: true },
-  { key: 'groq', label: 'Groq (free tier)', model: 'meta-llama/llama-4-scout-17b-16e-instruct', url: 'https://console.groq.com/keys', free: true },
+  { key: 'gemini', label: 'Google Gemini (free tier)', model: 'gemini-flash-latest', url: 'https://aistudio.google.com/apikey', free: true },
+  { key: 'groq', label: 'Groq (free tier)', model: 'openai/gpt-oss-120b', url: 'https://console.groq.com/keys', free: true },
   { key: 'openrouter', label: 'OpenRouter', model: 'openrouter/free', url: 'https://openrouter.ai/keys', free: true },
   { key: 'openai', label: 'OpenAI (ChatGPT API)', model: 'gpt-5-mini', url: 'https://platform.openai.com/api-keys' },
   { key: 'anthropic', label: 'Anthropic (Claude API)', model: 'claude-haiku-5-5', url: 'https://console.anthropic.com/settings/keys' },
@@ -191,6 +191,8 @@ export function coachContext(p) {
       location: [p.locality, p.city, p.state].filter(Boolean).join(', ') || 'India',
       conditions: (p.conditions || []).map((c) => CONDITIONS.find((x) => x.id === c)?.label || c),
       coach_language: p.coach_lang || 'hinglish' },
+    motivation: p.motivation?.arch ? { style: p.motivation.arch, hero: p.motivation.hero || null, why: p.motivation.why || null,
+      note: 'Match this energy in your tone and metaphors (original words only, never quote copyrighted lines).' } : null,
     seasonNote: climateTip(p.city),
     plan: { name: plan.title, today: plan.week[todayKey()] || null },
     targets: { kcal: targetKcal(p), protein_g: proteinFloor(p), bmr: bmr(p) },

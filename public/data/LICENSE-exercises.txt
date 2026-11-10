@@ -1,0 +1,4 @@
+exercises.json is a trimmed copy of free-exercise-db by yuhonas
+https://github.com/yuhonas/free-exercise-db
+Released into the public domain under the Unlicense (https://unlicense.org).
+Photos are loaded from the same repository.

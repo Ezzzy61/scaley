@@ -2,7 +2,7 @@
 // - Only signed-in users can call it (checked through the ai_take_quota RPC with the caller's JWT).
 // - Shared keys: Gemini free tier first, Grok (xAI) as fallback, 30 calls/user/day.
 // - Bring-your-own-key: the user's key is forwarded for that one request and never stored or logged.
-// Shared free chain (each optional, tried in AI_ORDER): GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, XAI_API_KEY.
+// Shared free chain (each optional, tried in AI_ORDER): GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, XAI_API_KEY (or GROK_API_KEY; gsk_ keys route to Groq).
 // Model overrides: GEMINI_MODEL, GROQ_MODEL, OPENROUTER_MODEL, XAI_MODEL.
 
 const CORS = {
@@ -94,7 +94,7 @@ async function gemini(key: string, model: string, system: string, msgs: Msg[], w
   }));
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
-    headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
+    headers: { 'x-goog-api-key': key, 'content-type': 'application/json' }, signal: AbortSignal.timeout(25000),
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents,
@@ -109,7 +109,7 @@ async function gemini(key: string, model: string, system: string, msgs: Msg[], w
 const BASES: Record<string, { base: string; model: string; name: string }> = {
   openai: { base: 'https://api.openai.com/v1', model: 'gpt-5-mini', name: 'OpenAI' },
   xai: { base: 'https://api.x.ai/v1', model: 'grok-4', name: 'Grok' },
-  groq: { base: 'https://api.groq.com/openai/v1', model: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Groq' },
+  groq: { base: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', name: 'Groq' },
   openrouter: { base: 'https://openrouter.ai/api/v1', model: 'openrouter/free', name: 'OpenRouter' },
 };
 
@@ -122,7 +122,7 @@ async function openaiLike(base: string, key: string, model: string, system: stri
   }))];
   const r = await fetch(`${base}/chat/completions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json', 'HTTP-Referer': 'https://ezzzy61.github.io/scaley/', 'X-Title': 'Scaley' },
+    signal: AbortSignal.timeout(25000), headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json', 'HTTP-Referer': 'https://ezzzy61.github.io/scaley/', 'X-Title': 'Scaley' },
     body: JSON.stringify({ model, messages }),
   });
   if (!r.ok) throw new ProviderError(r.status, `${base} ${r.status}: ${(await r.text()).slice(0, 300)}`);
@@ -140,7 +140,7 @@ async function anthropic(key: string, model: string, system: string, msgs: Msg[]
   if (merged[0]?.role !== 'user') merged.unshift({ role: 'user', text: '.' });
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, signal: AbortSignal.timeout(40000),
     body: JSON.stringify({
       model, max_tokens: 2000, system,
       messages: merged.map((m) => ({
@@ -152,6 +152,16 @@ async function anthropic(key: string, model: string, system: string, msgs: Msg[]
   if (!r.ok) throw new ProviderError(r.status, `Claude ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const j = await r.json();
   return (j.content || []).map((c: any) => c.text || '').join('');
+}
+
+async function discover(base: string, key: string, re: RegExp): Promise<string[]> {
+  if (!key) return [];
+  try {
+    const r = await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return [];
+    const j = await r.json();
+    return (j.data || []).map((m: any) => String(m.id)).filter((id: string) => re.test(id) && !/whisper|guard|tts|embed|orpheus|prompt/i.test(id)).slice(0, 4);
+  } catch { return []; }
 }
 
 function parseJson(text: string) {
@@ -209,28 +219,40 @@ Deno.serve(async (req) => {
 
     if (byok) {
       provider = String(byok.provider);
-      const defaults: Record<string, string> = { gemini: 'gemini-2.5-flash', anthropic: 'claude-haiku-5-5', ...Object.fromEntries(Object.entries(BASES).map(([k, v]) => [k, v.model])) };
+      const defaults: Record<string, string> = { gemini: 'gemini-flash-latest', anthropic: 'claude-haiku-5-5', ...Object.fromEntries(Object.entries(BASES).map(([k, v]) => [k, v.model])) };
       if (!(provider in defaults)) return json({ error: 'Unknown provider' }, 400);
       model = String(byok.model || defaults[provider]).slice(0, 100);
       text = await call(provider, byok.key, model);
     } else {
       const errors: string[] = [];
       const order = (Deno.env.get('AI_ORDER') || 'gemini,groq,openrouter,xai').split(',').map((x) => x.trim());
-      const cfg: Record<string, [string | undefined, string]> = {
-        gemini: [Deno.env.get('GEMINI_API_KEY'), Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash'],
-        groq: [Deno.env.get('GROQ_API_KEY'), Deno.env.get('GROQ_MODEL') || BASES.groq.model],
-        openrouter: [Deno.env.get('OPENROUTER_API_KEY'), Deno.env.get('OPENROUTER_MODEL') || BASES.openrouter.model],
-        xai: [Deno.env.get('XAI_API_KEY'), Deno.env.get('XAI_MODEL') || BASES.xai.model],
+      const grokAlias = Deno.env.get('GROK_API_KEY') || '';
+      const groqKey = Deno.env.get('GROQ_API_KEY') || (grokAlias.startsWith('gsk_') ? grokAlias : '');
+      const xaiKey = Deno.env.get('XAI_API_KEY') || (grokAlias && !grokAlias.startsWith('gsk_') ? grokAlias : '');
+      const list = (env: string | undefined, ...fallback: string[]) => [...new Set([...(env ? [env] : []), ...fallback])];
+      const cfg: Record<string, [string | undefined, () => Promise<string[]>]> = {
+        gemini: [Deno.env.get('GEMINI_API_KEY'), async () => list(Deno.env.get('GEMINI_MODEL'), 'gemini-flash-latest', 'gemini-3-flash-preview', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite', 'gemini-2.0-flash')],
+        groq: [groqKey, async () => list(Deno.env.get('GROQ_MODEL'), ...(msgs.some((x) => x.images?.length) ? await discover(BASES.groq.base, groqKey, /vision|llama-4|scout|maverick|vl/i) : []), 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3-32b', 'llama-3.1-8b-instant', ...await discover(BASES.groq.base, groqKey, /gpt-oss|llama|qwen|kimi/i))],
+        openrouter: [Deno.env.get('OPENROUTER_API_KEY'), async () => list(Deno.env.get('OPENROUTER_MODEL'), BASES.openrouter.model)],
+        xai: [xaiKey, async () => list(Deno.env.get('XAI_MODEL'), 'grok-4-fast-non-reasoning', 'grok-4-1-fast-non-reasoning', 'grok-3-mini', BASES.xai.model)],
       };
-      for (const prov of order) {
-        const [key, m] = cfg[prov] || [];
-        if (!key) continue;
-        try { model = m; text = await call(prov, key, m); provider = prov; break; }
-        catch (e) { errors.push((e as Error).message); }
+      const t0 = Date.now();
+      outer: for (const prov of order) {
+        const [key, getModels] = cfg[prov] || [];
+        if (!key || !getModels) continue;
+        for (const m of await getModels()) {
+          if (Date.now() - t0 > 60000) { errors.push('time budget'); break outer; }
+          try { model = m; text = await call(prov, key, m); provider = prov; break outer; }
+          catch (e) {
+            const st = e instanceof ProviderError ? e.status : 0;
+            errors.push(`${prov}/${m}: ${st} ${(e as Error).message.replace(/\s+/g, ' ').slice(0, 160)}`);
+            if (st === 401 || st === 403) break; // bad key: skip to next provider
+          }
+        }
       }
       if (!provider) {
         console.error('all providers failed', errors);
-        return json({ error: 'Scaley Free AI is busy or out of credits right now. Connect your own AI in Settings, or try again later.' }, 503);
+        return json({ error: 'Scaley Free AI is busy or out of credits right now. Connect your own AI in Settings, or try again later.', detail: errors.map((x) => x.replace(/key=[^&\s]+/gi, 'key=…')) }, 503);
       }
     }
 

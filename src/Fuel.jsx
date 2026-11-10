@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { FOODS, FOOD_CATS, OIL, SLOTS, oilKcal, foodsForRegion } from './data.js';
 import { regionOf } from './regions.js';
 import { get, put, remove, rows, newId, useStore } from './store.js';
@@ -6,6 +6,8 @@ import { dayIntake, targetKcal, proteinFloor, today, addDays, prettyDay, fmt, nu
 import { Bar, Icon, Sheet, Stepper, Field } from './ui.jsx';
 import { DeficitMeter } from './Dashboard.jsx';
 import { PhotoFood } from './PhotoFood.jsx';
+import { PackagedFood } from './Barcode.jsx';
+import { aa, celebrateOnce } from './fx.js';
 
 const mealId = (day, slot) => `${day}_${slot}`;
 
@@ -14,11 +16,11 @@ function ensureMeal(day, slot) {
   return get('meals', id) || put('meals', { id, day, slot, oil: 'home' });
 }
 
-function addFood(day, slot, f, qty) {
+function addFood(day, slot, f, qty, source = 'manual') {
   const m = ensureMeal(day, slot);
-  const existing = rows('food_entries').find((e) => e.meal_id === m.id && e.item === f.id && f.id !== 'custom');
+  const existing = rows('food_entries').find((e) => e.meal_id === m.id && e.item === f.id && f.id !== 'custom' && !f.id.startsWith('off:'));
   if (existing) return put('food_entries', { id: existing.id, qty: Math.round((existing.qty + (qty ?? 1)) * 100) / 100 });
-  put('food_entries', { id: newId(), day, meal_id: m.id, item: f.id, name: f.name, unit: f.unit, qty: qty ?? 1, kcal: f.kcal, protein: f.p, carbs: f.c ?? 0, fat: f.f ?? 0, source: 'manual' });
+  put('food_entries', { id: newId(), day, meal_id: m.id, item: f.id, name: f.name, unit: f.unit, qty: qty ?? 1, kcal: f.kcal, protein: f.p, carbs: f.c ?? 0, fat: f.f ?? 0, source });
 }
 
 export function Fuel({ p }) {
@@ -29,6 +31,7 @@ export function Fuel({ p }) {
   const tot = dayIntake(day);
   const target = targetKcal(p), pf = proteinFloor(p);
   const entries = rows('food_entries').filter((e) => e.day === day);
+  useEffect(() => { if (day === today() && pf && tot.protein >= pf) celebrateOnce('protein:' + day); }, [tot.protein, pf, day]);
 
   return (
     <div class="page">
@@ -55,7 +58,7 @@ export function Fuel({ p }) {
         const kcal = items.reduce((a, e) => a + e.kcal * e.qty, 0) + (items.length ? oilKcal(oil) : 0);
         const prot = items.reduce((a, e) => a + e.protein * e.qty, 0);
         return (
-          <section class="card meal">
+          <section class="card meal" ref={aa}>
             <div class="meal-head">
               <h3>{s.label}</h3>
               <span class="muted num">{fmt(kcal)} kcal · {fmt(prot)} g P</span>
@@ -72,7 +75,7 @@ export function Fuel({ p }) {
               const f = FOODS.find((x) => x.id === e.item);
               return (
                 <div class="item">
-                  <div class="item-name"><b>{e.name}</b><small class="muted">{e.unit} · {fmt(e.kcal * e.qty)} kcal · {fmt(e.protein * e.qty, 1)} g P{e.source === 'photo' ? ' · 📷 ±10%' : ''}</small></div>
+                  <div class="item-name"><b>{e.name}</b><small class="muted">{e.unit} · {fmt(e.kcal * e.qty)} kcal · {fmt(e.protein * e.qty, 1)} g P{e.source === 'photo' ? ' · 📷 ±10%' : e.source === 'barcode' ? ' · 🏷️ label' : ''}</small></div>
                   <Stepper value={e.qty} step={f?.step || 1}
                     onChange={(q) => (q <= 0 ? remove('food_entries', e.id) : put('food_entries', { id: e.id, qty: q }))} />
                 </div>
@@ -116,11 +119,13 @@ function Picker({ open, slot, day, p, onClose }) {
   return (
     <Sheet open={open} onClose={onClose} title={`Add to ${label}`}>
       <div class="tabs">
-        {[...FOOD_CATS, { key: 'custom', label: 'Custom' }].map((x) => (
+        {[...FOOD_CATS, { key: 'packaged', label: '🏷️ Packaged' }, { key: 'custom', label: 'Custom' }].map((x) => (
           <button class={cat === x.key ? 'on' : ''} onClick={() => setCat(x.key)}>{x.label}</button>
         ))}
       </div>
-      {cat === 'custom' ? (
+      {cat === 'packaged' ? (
+        <PackagedFood onPick={(it, g) => addFood(day, slot, { id: ('off:' + it.code).slice(0, 40), name: (it.brand && !it.name.toLowerCase().startsWith(it.brand.toLowerCase()) ? `${it.brand} ${it.name}` : it.name).slice(0, 80), unit: `${Math.round(g)} g`, kcal: Math.round(it.kcal * g / 100), p: Math.round(it.p * g / 10) / 10, c: Math.round(it.c * g / 10) / 10, f: Math.round(it.f * g / 10) / 10, step: 1 }, 1, 'barcode')} />
+      ) : cat === 'custom' ? (
         <form class="stack" onSubmit={addCustom}>
           <Field label="Name"><input value={c.name} maxLength={80} onInput={(e) => setC({ ...c, name: e.currentTarget.value })} placeholder="e.g. Office canteen thali" /></Field>
           <div class="grid2">

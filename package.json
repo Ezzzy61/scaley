@@ -9,7 +9,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@fontsource/bebas-neue": "^5.3.0",
+    "@fontsource/oswald": "^5.3.0",
+    "@formkit/auto-animate": "^0.10.2",
     "@supabase/supabase-js": "^2.119.0",
+    "canvas-confetti": "^1.9.4",
     "preact": "^11.2.0"
   },
   "devDependencies": {

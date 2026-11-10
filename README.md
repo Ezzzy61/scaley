@@ -27,6 +27,19 @@ A minimalist, zero-BS fitness and deficit tracker for everyday lifters who eat h
   - Automatic fallback to Scaley Free when the user's engine fails.
   - Server secrets: `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `XAI_API_KEY` (all optional), `AI_ORDER` to change the chain order.
 
+## v4: your vibe, open data, research-backed results
+
+- **Light / dark / auto themes.** The accent follows your goal (Aggressive Cut orange, Moderate Cut emerald, Recomp teal, Lean Bulk amber, Strength indigo, Diagnostic sky) or your motivation.
+- **Motivation profile.** Boxer, pehlwan, mythic warrior, superhero, anime arc, athlete, fauji, faith or family, plus your hero, your why and your own mantras. It sets the fonts (Bebas Neue / Oswald via Fontsource), the daily homescreen line (original lines written for Scaley), "Hype me" AI lines and the coach's tone.
+- **Workout music.** Save SoundCloud, Spotify, YouTube or Apple Music links (embedded players), and any other link (JioSaavn, Gaana, Discord…). Vibe chips search phonk, dubstep, desi hip-hop, Bollywood gym, devotional and more. Links show up inside live workouts.
+- **Exercise library.** 876 exercises with step-by-step instructions and photos from [free-exercise-db](https://github.com/yuhonas/free-exercise-db) (public domain), filterable by muscle and home/gym equipment, addable straight into a workout.
+- **Packaged foods.** Barcode scan (BarcodeDetector) and search via [Open Food Facts](https://world.openfoodfacts.org) (ODbL), filtered to products sold in India.
+- **Raw ingredients per 100 g.** Atta, dals, millets, soya, paneer, meats and more, using approximate IFCT 2017-style values.
+- **Results engine.** Double-progression targets for every lift ("Target today: 62.5 kg × 6"), PR confetti (canvas-confetti), a weekly results score (sessions, protein days, steps, sleep, hard sets per muscle), a logging streak, screen wake lock during workouts, and BMI against WHO Asian cut-offs.
+- **Science of the day.** 11 plain-English research summaries with links: protein (Morton 2018), volume (Schoenfeld 2017), proximity to failure (Refalo 2023), frequency (Schoenfeld 2019), steps (Paluch 2022), sleep (Nedeltcheva 2010), rate of loss (Helms 2014), post-meal walks (Buffey 2022), stair snacks (Jenkins 2019), Asian BMI (WHO 2004) and ICMR-NIN 2024.
+
+Run `supabase/004_style.sql` once to add the `theme`, `accent_mode` and `motivation` columns.
+
 ## Stack
 
 Preact + esbuild static PWA on GitHub Pages; Supabase Auth + Postgres with row-level security (`supabase/schema.sql`, `002_ai.sql`, `003_coach.sql`); private Storage bucket for progress photos; Edge Function `supabase/functions/ai` as the AI gateway (keys live in Supabase secrets, never in the app).

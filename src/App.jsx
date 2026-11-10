@@ -10,6 +10,9 @@ import { Progress } from './Progress.jsx';
 import { Coach } from './Coach.jsx';
 import { KEY_PROVIDERS, PUTER_MODELS, getEngine, setEngine, connectOpenRouter, finishOpenRouter, puterSignIn, engineLabel, aiState } from './ai.js';
 import { Icon, Sheet } from './ui.jsx';
+import { applyTheme } from './theme.js';
+import { MotivationSheet, Appearance } from './Motivation.jsx';
+import { BmiNote } from './Science.jsx';
 
 const TABS = [
   { key: 'home', label: 'Dashboard', icon: 'home' },
@@ -84,7 +87,10 @@ function Settings({ open, onClose, p }) {
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   return (
     <Sheet open={open} onClose={onClose} title="Settings">
+      <Appearance p={p} />
+      <hr />
       <ProfileForm initial={p} showAdvanced submitLabel="Save profile" onSaved={onClose} />
+      <BmiNote p={p} />
       <hr />
       <AiSettings />
       <hr />
@@ -166,6 +172,7 @@ export function App() {
   const [tab, setTab] = useState(tabFromHash());
   const [settings, setSettings] = useState(false);
   const [ask, setAsk] = useState(null);
+  const [motive, setMotive] = useState(false);
   const [timer, setTimerState] = useState(() => { try { const t = JSON.parse(localStorage.getItem('scaley:timer')); return t && t.end > Date.now() - 60000 ? t : null; } catch { return null; } });
   const setTimer = (t) => { setTimerState(t); try { t ? localStorage.setItem('scaley:timer', JSON.stringify(t)) : localStorage.removeItem('scaley:timer'); } catch {} };
 
@@ -198,6 +205,7 @@ export function App() {
   if (auth.loading) return <div class="splash"><img src="icons/icon-192.png" width="72" height="72" alt="Scaley" /></div>;
   if (!auth.uid) return <Auth />;
   const p = get('profiles', 'me');
+  applyTheme(p);
   if (!p) {
     if (!hasPulled() && navigator.onLine && sync$.status !== 'error') return <div class="splash"><img src="icons/icon-192.png" width="72" height="72" alt="" /><p class="muted">Loading your logs…</p></div>;
     return <Onboarding />;
@@ -210,7 +218,7 @@ export function App() {
     <div class="app">
       <div class="statusbar"><SyncDot /></div>
       <main>
-        {tab === 'home' && <Dashboard p={p} go={go} openSettings={() => setSettings(true)} askCoach={askCoach} />}
+        {tab === 'home' && <Dashboard p={p} go={go} openSettings={() => setSettings(true)} askCoach={askCoach} openMotivation={() => setMotive(true)} />}
         {tab === 'fuel' && <Fuel p={p} />}
         {tab === 'iron' && <Iron p={p} onSetDone={onSetDone} askCoach={askCoach} />}
         {tab === 'progress' && <Progress p={p} />}
@@ -225,6 +233,7 @@ export function App() {
         ))}
       </nav>
       <Settings open={settings} onClose={() => setSettings(false)} p={p} />
+      {motive && <MotivationSheet open onClose={() => setMotive(false)} p={p} />}
     </div>
   );
 }

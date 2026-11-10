@@ -1,10 +1,14 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { SPLITS, POPULAR_SPLITS, EXERCISE_LIBRARY, isBarbell } from './data.js';
 import { recommendPlans, todayKey, DAYS } from './plans.js';
 import { activityById } from './activities.js';
 import { get, put, remove, rows, newId, useStore } from './store.js';
 import { today, prettyDay, lastPerformance, plateMath, fmt, num, int } from './calc.js';
 import { Icon, Sheet, Field, Seg } from './ui.jsx';
+import { ExerciseLibrary } from './Library.jsx';
+import { suggestNext, bestE1rm, repRange } from './science.js';
+import { celebrate, keepAwake, e1rm, aa } from './fx.js';
+import { parseMusic } from './motivation.js';
 
 function startWorkout(split, names) {
   const id = newId();
@@ -23,12 +27,13 @@ function seedSets(workoutId, day, name) {
 export function Iron({ p, onSetDone, askCoach }) {
   useStore();
   const [openId, setOpenId] = useState(null);
+  const [view, setView] = useState('start');
+  const [lib, setLib] = useState(false);
   const active = rows('workouts').filter((w) => !w.finished).sort((a, b) => (b.started_at || '').localeCompare(a.started_at || ''))[0];
   const w = (openId && get('workouts', openId)) || active;
 
   if (w) return <Workout w={w} p={p} onSetDone={onSetDone} onClose={() => setOpenId(null)} />;
 
-  const [view, setView] = useState('start');
   const history = rows('workouts').filter((x) => x.finished).sort((a, b) => (b.started_at || b.day).localeCompare(a.started_at || a.day)).slice(0, 12);
   const sets = rows('workout_sets');
   const plans = recommendPlans(p);
@@ -38,7 +43,9 @@ export function Iron({ p, onSetDone, askCoach }) {
   const classic = ['Push', 'Pull', 'Legs', 'Upper', 'Lower', 'Arms', 'Full Body'];
   return (
     <div class="page">
-      <header class="top"><div><h1 class="h1">Iron</h1><small class="muted">{plan ? plan.title : 'Pick a session or follow a plan'}</small></div></header>
+      <header class="top"><div><h1 class="h1">Iron</h1><small class="muted">{plan ? plan.title : 'Pick a session or follow a plan'}</small></div>
+        <button class="btn ghost sm" onClick={() => setLib(true)}><Icon name="search" size={15} /> Library</button></header>
+      <ExerciseLibrary open={lib} onClose={() => setLib(false)} />
       <Seg value={view} onChange={setView} options={[{ value: 'start', label: 'Train' }, { value: 'plans', label: 'Plans' }, { value: 'mine', label: 'My workouts' }]} />
 
       {view === 'start' && <>
@@ -149,12 +156,15 @@ function Workout({ w, p, onSetDone, onClose }) {
   const [plate, setPlate] = useState(null);
   const [addName, setAddName] = useState('');
   const [confirmDel, setConfirmDel] = useState(false);
+  const [lib, setLib] = useState(false);
+  useEffect(() => { keepAwake(!w.finished); return () => keepAwake(false); }, [w.finished]);
+  const music = (p.motivation?.music || []).map((m) => ({ ...m, info: parseMusic(m.url) })).filter((m) => m.info);
   const sets = rows('workout_sets').filter((s) => s.workout_id === w.id);
   const doneCount = sets.filter((s) => s.done).length;
 
-  function addExercise(e) {
-    e.preventDefault();
-    const name = addName.trim().slice(0, 60);
+  function addExercise(e, picked) {
+    e?.preventDefault();
+    const name = (picked || addName).trim().slice(0, 60);
     if (!name || w.exercises.some((x) => x.name === name)) return;
     put('workouts', { id: w.id, exercises: [...w.exercises, { name, bb: isBarbell(name) }] });
     seedSets(w.id, w.day, name);
@@ -171,12 +181,17 @@ function Workout({ w, p, onSetDone, onClose }) {
         <div><h1 class="h1">{w.split}</h1><small class="muted">{prettyDay(w.day)} · {doneCount} sets done</small></div>
         {w.finished
           ? <button class="btn ghost" onClick={onClose}>Back</button>
-          : <button class="btn primary" onClick={() => { put('workouts', { id: w.id, finished: true }); onClose(); }}>Finish</button>}
+          : <button class="btn primary" onClick={() => { put('workouts', { id: w.id, finished: true }); if (doneCount) celebrate('big'); onClose(); }}>Finish</button>}
       </header>
+      {!w.finished && music.length > 0 && (
+        <div class="chips">{music.slice(0, 3).map((m) => <a class="chip" href={m.url} target="_blank" rel="noopener">🎧 {m.label || m.info.label}</a>)}</div>
+      )}
 
       {w.exercises.map((ex) => {
         const exSets = sets.filter((s) => s.exercise === ex.name).sort((a, b) => a.idx - b.idx);
         const last = lastPerformance(ex.name, w.id);
+        const next = !w.finished && suggestNext(p, ex.name, last);
+        const [lo, hi] = repRange(p, ex.name);
         return (
           <section class="card ex">
             <div class="ex-head">
@@ -186,8 +201,10 @@ function Workout({ w, p, onSetDone, onClose }) {
                 {!w.finished && <button class="icon-btn sm" aria-label={`Remove ${ex.name}`} onClick={() => removeExercise(ex.name)}><Icon name="trash" size={16} /></button>}
               </div>
             </div>
+            {next ? <p class="next-tip"><b>Target today: {next.kg ? `${fmt(next.kg, 2)} kg × ${next.reps}` : `${next.reps} reps`}</b> <small class="muted">{next.why}</small></p>
+              : !w.finished && <p class="next-tip"><small class="muted">First time: pick a weight you could lift {hi + 2} times, do {lo}–{hi} reps and stop 1–2 reps before failure.</small></p>}
             <div class="set-grid set-head"><span>Set</span><span>Previous</span><span>kg</span><span>Reps</span><span /></div>
-            {exSets.map((s, i) => <SetRow key={s.id} s={s} n={i + 1} prev={last?.sets[i] || last?.sets[last.sets.length - 1]}
+            {exSets.map((s, i) => <SetRow key={s.id} s={s} n={i + 1} prev={last?.sets[i] || last?.sets[last.sets.length - 1]} next={next}
               onDone={() => onSetDone()} openPlates={(kg) => ex.bb && setPlate({ target: kg })} />)}
             {!w.finished && (
               <button class="btn ghost full sm" onClick={() => {
@@ -204,8 +221,10 @@ function Workout({ w, p, onSetDone, onClose }) {
           <input list="ex-lib" placeholder="Add exercise…" value={addName} maxLength={60} onInput={(e) => setAddName(e.currentTarget.value)} />
           <datalist id="ex-lib">{EXERCISE_LIBRARY.map((n) => <option value={n} />)}</datalist>
           <button class="btn primary">Add</button>
+          <button type="button" class="icon-btn" aria-label="Browse exercise library" onClick={() => setLib(true)}><Icon name="search" /></button>
         </form>
       )}
+      <ExerciseLibrary open={lib} onClose={() => setLib(false)} onAdd={(n) => addExercise(null, n)} />
 
       {w.exercises.length > 0 && <button class="btn ghost full sm" onClick={() => { put('workout_templates', { id: newId(), name: w.split.slice(0, 40), exercises: w.exercises.map((x) => x.name) }); }}>Save as my workout</button>}
 
@@ -218,26 +237,28 @@ function Workout({ w, p, onSetDone, onClose }) {
   );
 }
 
-function SetRow({ s, n, prev, onDone, openPlates }) {
+function SetRow({ s, n, prev, next, onDone, openPlates }) {
   const [kg, setKg] = useState(s.kg ?? '');
   const [reps, setReps] = useState(s.reps ?? '');
   const commit = (k, r) => put('workout_sets', { id: s.id, kg: num(k), reps: int(r) });
   function toggle() {
     if (s.done) return put('workout_sets', { id: s.id, done: false });
-    const k = num(kg) ?? prev?.kg ?? null;
-    const r = int(reps) ?? prev?.reps ?? null;
+    const k = num(kg) ?? next?.kg ?? prev?.kg ?? null;
+    const r = int(reps) ?? next?.reps ?? prev?.reps ?? null;
     setKg(k ?? ''); setReps(r ?? '');
+    const before = bestE1rm(s.exercise, s.id);
     put('workout_sets', { id: s.id, kg: k, reps: r, done: true });
+    if (before > 0 && e1rm(k, r) > before) { celebrate('pr'); s.__pr = true; }
     onDone();
   }
   return (
     <div class={'set-grid' + (s.done ? ' done' : '')}>
       <span class="set-n">{n}</span>
       <span class="prev muted">{prev ? `Last: ${fmt(prev.kg, 2)}kg × ${prev.reps ?? '–'}` : '—'}</span>
-      <input inputMode="decimal" aria-label={`Set ${n} kg`} placeholder={prev?.kg ?? 'kg'} value={kg}
+      <input inputMode="decimal" aria-label={`Set ${n} kg`} placeholder={next?.kg ?? prev?.kg ?? 'kg'} value={kg}
         onInput={(e) => { setKg(e.currentTarget.value); commit(e.currentTarget.value, reps); }}
         onDblClick={() => openPlates(num(kg) ?? prev?.kg)} />
-      <input inputMode="numeric" aria-label={`Set ${n} reps`} placeholder={prev?.reps ?? 'reps'} value={reps}
+      <input inputMode="numeric" aria-label={`Set ${n} reps`} placeholder={next?.reps ?? prev?.reps ?? 'reps'} value={reps}
         onInput={(e) => { setReps(e.currentTarget.value); commit(kg, e.currentTarget.value); }} />
       <button class={'check' + (s.done ? ' on' : '')} aria-pressed={s.done} aria-label={`Complete set ${n}`} onClick={toggle}><Icon name="check" size={18} stroke={3} /></button>
     </div>

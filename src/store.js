@@ -9,7 +9,7 @@ export const TABLES = ['profiles', 'meals', 'food_entries', 'workouts', 'workout
 const COMMON = ['user_id', 'id', 'updated_at', 'deleted'];
 const COLS = {
   profiles: ['sex', 'age', 'height_cm', 'weight_kg', 'target_kg', 'goal', 'step_goal', 'plan_workout_kcal', 'rest_default', 'tdee', 'started_on',
-    'state', 'city', 'locality', 'occupation', 'experience', 'conditions', 'coach_lang', 'plan_id', 'diet'],
+    'state', 'city', 'locality', 'occupation', 'experience', 'conditions', 'coach_lang', 'plan_id', 'diet', 'theme', 'accent_mode', 'motivation'],
   meals: ['day', 'slot', 'oil'],
   food_entries: ['day', 'meal_id', 'item', 'name', 'unit', 'qty', 'kcal', 'protein', 'carbs', 'fat', 'source'],
   workouts: ['day', 'split', 'started_at', 'finished', 'exercises'],

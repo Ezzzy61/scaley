@@ -3,6 +3,9 @@ import { get, put, rows, useStore } from './store.js';
 import { dayBalance, proteinFloor, goalOf, today, prettyDay, fmt, int, weightSeries, stallCheck } from './calc.js';
 import { Bar, Icon } from './ui.jsx';
 import { CheckInCard, ActivityCard, ForYou } from './Today.jsx';
+import { MotivationCard, MusicCard } from './Motivation.jsx';
+import { WeeklyDose, EvidenceCard } from './Science.jsx';
+import { streak } from './science.js';
 
 export function DeficitMeter({ p, day }) {
   const b = dayBalance(day, p);
@@ -39,7 +42,7 @@ export function DeficitMeter({ p, day }) {
   );
 }
 
-export function Dashboard({ p, go, openSettings, askCoach }) {
+export function Dashboard({ p, go, openSettings, askCoach, openMotivation }) {
   useStore();
   const day = today();
   const b = dayBalance(day, p);
@@ -53,6 +56,7 @@ export function Dashboard({ p, go, openSettings, askCoach }) {
   const active = rows('workouts').find((w) => w.day === day && !w.finished);
   const doneSets = rows('workout_sets').filter((s) => s.day === day && s.done).length;
   const left = b.target - b.intake.kcal;
+  const st = streak();
 
   const saveLog = (patch) => put('day_logs', { id: day, day, steps: log?.steps ?? null, workout_kcal: log?.workout_kcal ?? null, ...patch });
 
@@ -60,8 +64,13 @@ export function Dashboard({ p, go, openSettings, askCoach }) {
     <div class="page">
       <header class="top">
         <div><h1 class="h1">{greeting()}</h1><small class="muted">{goalOf(p).label}{p.city ? ` · ${p.city}` : ''}</small></div>
-        <button class="icon-btn" onClick={openSettings} aria-label="Settings"><Icon name="gear" /></button>
+        <div class="row">
+          {st > 0 && <span class="streak" title="Days in a row with something logged"><Icon name="flame" size={15} /> {st}</span>}
+          <button class="icon-btn" onClick={openSettings} aria-label="Settings"><Icon name="gear" /></button>
+        </div>
       </header>
+
+      <MotivationCard p={p} onEdit={openMotivation} />
 
       {stall?.stalled && (
         <button class="alert" onClick={() => go('progress')}>
@@ -118,7 +127,10 @@ export function Dashboard({ p, go, openSettings, askCoach }) {
           <small class="muted">{last?.day === day ? `Today ${fmt(last.kg, 1)} kg` : 'Log your morning weigh-in'}</small>
         </section>
       </div>
+      <WeeklyDose p={p} go={go} />
       <ForYou p={p} go={go} askCoach={askCoach} />
+      <MusicCard p={p} onEdit={openMotivation} />
+      <EvidenceCard />
     </div>
   );
 }
